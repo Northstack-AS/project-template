@@ -21,7 +21,6 @@ jobs:
       macro: '@openhands-agent'
       max_iterations: 25
       LLM_MODEL: 'openrouter/google/gemini-3-flash-preview'
-      GIT_AUTHOR_NAME: barhaughogda
       target_branch: 'staging'
     secrets:
       PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
