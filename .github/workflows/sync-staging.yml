@@ -1,9 +1,10 @@
 name: Sync Staging to Main
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+  pull_request:
+    types: [closed]
+    branches: [main]
 
 permissions:
   contents: write
@@ -12,6 +13,10 @@ jobs:
   sync-staging:
     name: Force Update Staging
     runs-on: ubuntu-latest
+    # Run ONLY if manually dispatched OR if a PR targeting main was merged (staging -> main merge)
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,4 +28,4 @@ jobs:
         run: |
           git checkout -b staging || git checkout staging
           git reset --hard origin/main
-          git push --force-with-lease origin staging
+          git push --force origin staging
