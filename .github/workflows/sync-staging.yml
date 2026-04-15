@@ -1,0 +1,26 @@
+name: Sync Staging to Main
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  sync-staging:
+    name: Force Update Staging
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Reset staging to main
+        run: |
+          git checkout -b staging || git checkout staging
+          git reset --hard origin/main
+          git push --force-with-lease origin staging
