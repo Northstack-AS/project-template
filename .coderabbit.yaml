@@ -1,0 +1,4 @@
+yamlreviews:
+  drafts: true
+  auto_review:
+    enabled: true
