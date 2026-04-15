@@ -17,14 +17,25 @@ jobs:
     if: |
       (github.event.label.name == 'fix-me' || contains(github.event.comment.body, '@openhands-agent')) &&
       github.event.issue.pull_request == null
-    uses: OpenHands/OpenHands/.github/workflows/openhands-resolver.yml@main
-    with:
-      macro: '@openhands-agent'
-      max_iterations: 25
-      LLM_MODEL: 'openrouter/google/gemini-3-flash-preview'
-      target_branch: 'staging'
-    secrets:
-      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
-      PAT_USERNAME: ${{ secrets.PAT_USERNAME || github.actor }}
-      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Git
+        run: |
+          git config --global user.email "oystein@barhaughogda.com"
+          git config --global user.name "Oystein Barhaughogda"
+
+      - name: Call OpenHands Resolver
+        uses: OpenHands/OpenHands/.github/workflows/openhands-resolver.yml@main
+        with:
+          macro: '@openhands-agent'
+          max_iterations: 25
+          LLM_MODEL: 'openrouter/google/gemini-3-flash-preview'
+          target_branch: 'staging'
+        secrets:
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+          PAT_USERNAME: ${{ secrets.PAT_USERNAME || github.actor }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
