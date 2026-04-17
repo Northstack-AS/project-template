@@ -15,11 +15,20 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
       - name: Install dependencies
-        run: npm install --legacy-peer-deps
+        run: |
+          if [ -f package.json ]; then
+            npm install --legacy-peer-deps
+          else
+            echo "No package.json found — skipping install (template repo)"
+          fi
       - name: Run lint
-        run: npm run lint
+        run: |
+          if [ -f package.json ] && node -e "require('./package.json').scripts?.lint" 2>/dev/null; then
+            npm run lint
+          else
+            echo "No lint script — skipping (template repo)"
+          fi
 
   typecheck:
     runs-on: ubuntu-latest
@@ -29,8 +38,17 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
       - name: Install dependencies
-        run: npm install --legacy-peer-deps
+        run: |
+          if [ -f package.json ]; then
+            npm install --legacy-peer-deps
+          else
+            echo "No package.json found — skipping install (template repo)"
+          fi
       - name: Run typecheck
-        run: npm run typecheck
+        run: |
+          if [ -f package.json ] && node -e "require('./package.json').scripts?.typecheck" 2>/dev/null; then
+            npm run typecheck
+          else
+            echo "No typecheck script — skipping (template repo)"
+          fi
