@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+    branches: [main, staging]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    if: hashFiles('package.json') != ''
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+      - name: Run lint
+        run: |
+          if node -e "require('./package.json').scripts?.lint" 2>/dev/null; then
+            npm run lint
+          else
+            echo "No lint script — skipping"
+          fi
+
+  typecheck:
+    runs-on: ubuntu-latest
+    if: hashFiles('package.json') != ''
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+      - name: Run typecheck
+        run: |
+          if node -e "require('./package.json').scripts?.typecheck" 2>/dev/null; then
+            npm run typecheck
+          else
+            echo "No typecheck script — skipping"
+          fi
+
+  no-package-json:
+    runs-on: ubuntu-latest
+    if: hashFiles('package.json') == ''
+    steps:
+      - run: echo "Template repo has no package.json — skipping Node.js checks."
