@@ -17,7 +17,7 @@ jobs:
     if: |
       (github.event.label.name == 'fix-me' || contains(github.event.comment.body, '@openhands-agent')) &&
       github.event.issue.pull_request == null
-    uses: OpenHands/OpenHands/.github/workflows/openhands-resolver.yml@main
+    uses: OpenHands/OpenHands-Web/.github/workflows/openhands-resolver.yml@88df1233d540730c795f1b014ec38fcf5f51d8b1
     with:
       macro: '@openhands-agent'
       max_iterations: 25
