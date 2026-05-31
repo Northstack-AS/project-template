@@ -1,5 +1,14 @@
 name: Resolve Issue with OpenHands
 
+# Inlined from OpenHands/OpenHands-Web@88df1233d540730c795f1b014ec38fcf5f51d8b1
+# with openhands-ai pinned to ==1.6.0.
+#
+# Reason: openhands-ai==1.7.0 restructured the package — `openhands.resolver`
+# was moved to `openhands.app_server.*`, breaking `python -m openhands.resolver.resolve_issue`.
+# Upstream reusable workflow always installs the latest PyPI release so we cannot
+# fix this from the caller side. Inlining gives us explicit version control.
+# Track: https://github.com/OpenHands/OpenHands/issues (resolver module regression in 1.7.0)
+
 on:
   issues:
     types: [labeled]
@@ -13,21 +22,245 @@ permissions:
 
 jobs:
   call-openhands:
-    # Trigger on 'fix-me' label OR '@openhands-agent' comment, but ONLY if NOT on a Pull Request
+    name: call-openhands / auto-fix
     if: |
       (github.event.label.name == 'fix-me' || contains(github.event.comment.body, '@openhands-agent')) &&
       github.event.issue.pull_request == null
-    uses: OpenHands/OpenHands-Web/.github/workflows/openhands-resolver.yml@88df1233d540730c795f1b014ec38fcf5f51d8b1
-    with:
-      macro: '@openhands-agent'
-      max_iterations: 25
-      LLM_MODEL: 'openrouter/google/gemini-3-flash-preview'
-      target_branch: 'staging'
-      pr_type: 'ready'
-      # Configures git identity for OpenHands in the reusable workflow
-      # Note: Reusable workflows in GHA cannot be preceded by steps in the same job
-    secrets:
-      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
-      PAT_USERNAME: ${{ secrets.PAT_USERNAME || github.actor }}
-      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Pin openhands-ai version
+        # openhands-ai==1.7.0 removed openhands.resolver — pin to last known-good
+        run: echo "openhands-ai==1.6.0" > /tmp/requirements.txt
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.pythonLocation }}/lib/python3.12/site-packages/*
+          key: ${{ runner.os }}-pip-openhands-resolver-${{ hashFiles('/tmp/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-openhands-resolver-${{ hashFiles('/tmp/requirements.txt') }}
+
+      - name: Check required environment variables
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: |
+          if [ -z "$LLM_API_KEY" ]; then
+            echo "Error: Required environment variable LLM_API_KEY is not set."
+            exit 1
+          fi
+
+      - name: Set environment variables
+        env:
+          REVIEW_BODY: ${{ github.event.review.body || '' }}
+        run: |
+          if [ -n "${{ github.event.issue.pull_request }}" ]; then
+            echo "ISSUE_NUMBER=${{ github.event.issue.number }}" >> $GITHUB_ENV
+            echo "ISSUE_TYPE=pr" >> $GITHUB_ENV
+          else
+            echo "ISSUE_NUMBER=${{ github.event.issue.number }}" >> $GITHUB_ENV
+            echo "ISSUE_TYPE=issue" >> $GITHUB_ENV
+          fi
+
+          echo "COMMENT_ID=${{ github.event.comment.id || 'None' }}" >> $GITHUB_ENV
+          echo "MAX_ITERATIONS=25" >> $GITHUB_ENV
+          # TARGET_BRANCH: must be main — the default branch for this repo.
+          # Previously set to "staging" which caused all OpenHands PRs to target the wrong branch.
+          echo "TARGET_BRANCH=main" >> $GITHUB_ENV
+
+      - name: Comment on issue with start message
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PAT_TOKEN || github.token }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: ${{ env.ISSUE_NUMBER }},
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `[OpenHands](https://github.com/OpenHands/OpenHands) started fixing the issue! You can monitor the progress [here](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}).`
+            });
+
+      - name: Install OpenHands
+        run: pip install -r /tmp/requirements.txt
+
+      - name: Attempt to resolve issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+          GITHUB_USERNAME: ${{ secrets.PAT_USERNAME || 'openhands-agent' }}
+          GIT_USERNAME: ${{ secrets.PAT_USERNAME || 'openhands-agent' }}
+          LLM_MODEL: "openrouter/google/gemini-3-flash-preview"
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          PYTHONPATH: ""
+        run: |
+          cd /tmp && python -m openhands.resolver.resolve_issue \
+            --selected-repo ${{ github.repository }} \
+            --issue-number ${{ env.ISSUE_NUMBER }} \
+            --issue-type ${{ env.ISSUE_TYPE }} \
+            --max-iterations ${{ env.MAX_ITERATIONS }} \
+            --comment-id ${{ env.COMMENT_ID }} \
+            --is-experimental false
+
+      - name: Check resolution result
+        id: check_result
+        run: |
+          if cd /tmp && grep -q '"success":true' output/output.jsonl; then
+            echo "RESOLUTION_SUCCESS=true" >> $GITHUB_OUTPUT
+          else
+            echo "RESOLUTION_SUCCESS=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload output.jsonl as artifact
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: resolver-output
+          path: /tmp/output/output.jsonl
+          retention-days: 30
+
+      - name: Create draft PR or push branch
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+          GITHUB_USERNAME: ${{ secrets.PAT_USERNAME || 'openhands-agent' }}
+          GIT_USERNAME: ${{ secrets.PAT_USERNAME || 'openhands-agent' }}
+          LLM_MODEL: "openrouter/google/gemini-3-flash-preview"
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          PYTHONPATH: ""
+        run: |
+          if [ "${{ steps.check_result.outputs.RESOLUTION_SUCCESS }}" == "true" ]; then
+            cd /tmp && python -m openhands.resolver.send_pull_request \
+              --issue-number ${{ env.ISSUE_NUMBER }} \
+              --target-branch ${{ env.TARGET_BRANCH }} \
+              --pr-type ready \
+              --reviewer ${{ github.actor }} | tee pr_result.txt && \
+              grep "PR created" pr_result.txt | sed 's/.*\///g' > pr_number.txt
+          else
+            cd /tmp && python -m openhands.resolver.send_pull_request \
+              --issue-number ${{ env.ISSUE_NUMBER }} \
+              --pr-type branch \
+              --send-on-failure | tee branch_result.txt && \
+              grep "branch created" branch_result.txt | sed 's/.*\///g; s/.expand=1//g' > branch_name.txt
+          fi
+
+      - name: Analyze Push Logs (Updated PR or No Changes)
+        uses: actions/github-script@v7
+        if: always()
+        env:
+          AGENT_RESPONDED: ${{ env.AGENT_RESPONDED || 'false' }}
+          ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
+        with:
+          github-token: ${{ secrets.PAT_TOKEN || github.token }}
+          script: |
+            const fs = require('fs');
+            const issueNumber = process.env.ISSUE_NUMBER;
+            let logContent = '';
+            try {
+              logContent = fs.readFileSync('/tmp/pr_result.txt', 'utf8').trim();
+            } catch (error) {
+              console.error('Error reading pr_result.txt file:', error);
+            }
+            const noChangesMessage = `No changes to commit for issue #${issueNumber}. Skipping commit.`;
+            if (logContent.includes("Updated pull request")) {
+              console.log("Updated pull request found. Skipping comment.");
+              process.env.AGENT_RESPONDED = 'true';
+            } else if (logContent.includes(noChangesMessage)) {
+              github.rest.issues.createComment({
+                issue_number: issueNumber,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `The workflow to fix this issue encountered an error. Openhands failed to create any code changes.`
+              });
+              process.env.AGENT_RESPONDED = 'true';
+            }
+
+      - name: Comment on issue
+        uses: actions/github-script@v7
+        if: always()
+        env:
+          AGENT_RESPONDED: ${{ env.AGENT_RESPONDED || 'false' }}
+          ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
+          RESOLUTION_SUCCESS: ${{ steps.check_result.outputs.RESOLUTION_SUCCESS }}
+        with:
+          github-token: ${{ secrets.PAT_TOKEN || github.token }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const issueNumber = process.env.ISSUE_NUMBER;
+            const success = process.env.RESOLUTION_SUCCESS === 'true';
+            let prNumber = '';
+            let branchName = '';
+            let resultExplanation = '';
+            try {
+              if (success) {
+                prNumber = fs.readFileSync('/tmp/pr_number.txt', 'utf8').trim();
+              } else {
+                branchName = fs.readFileSync('/tmp/branch_name.txt', 'utf8').trim();
+              }
+            } catch (error) {
+              console.error('Error reading file:', error);
+            }
+            try {
+              if (!success) {
+                const outputFilePath = path.resolve('/tmp/output/output.jsonl');
+                if (fs.existsSync(outputFilePath)) {
+                  const outputContent = fs.readFileSync(outputFilePath, 'utf8');
+                  const jsonLines = outputContent.split('\n').filter(line => line.trim() !== '');
+                  if (jsonLines.length > 0) {
+                    const firstEntry = JSON.parse(jsonLines[0]);
+                    resultExplanation = firstEntry.result_explanation || '';
+                  }
+                }
+              }
+            } catch (error) {
+              console.error('Error reading file:', error);
+            }
+            if (success && prNumber) {
+              github.rest.issues.createComment({
+                issue_number: issueNumber,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `A potential fix has been generated and a PR #${prNumber} has been created. Please review the changes.`
+              });
+              process.env.AGENT_RESPONDED = 'true';
+            } else if (!success && branchName) {
+              let commentBody = `An attempt was made to automatically fix this issue, but it was unsuccessful. A branch named '${branchName}' has been created with the attempted changes. You can view the branch [here](https://github.com/${context.repo.owner}/${context.repo.repo}/tree/${branchName}). Manual intervention may be required.`;
+              if (resultExplanation) {
+                commentBody += `\n\nAdditional details about the failure:\n${resultExplanation}`;
+              }
+              github.rest.issues.createComment({
+                issue_number: issueNumber,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: commentBody
+              });
+              process.env.AGENT_RESPONDED = 'true';
+            }
+
+      - name: Fallback Error Comment
+        uses: actions/github-script@v7
+        if: ${{ env.AGENT_RESPONDED == 'false' }}
+        env:
+          ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
+        with:
+          github-token: ${{ secrets.PAT_TOKEN || github.token }}
+          script: |
+            const issueNumber = process.env.ISSUE_NUMBER;
+            github.rest.issues.createComment({
+              issue_number: issueNumber,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `The workflow to fix this issue encountered an error. Please check the [workflow logs](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) for more information.`
+            });
