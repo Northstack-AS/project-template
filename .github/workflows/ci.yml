@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+    branches: [main, staging]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        if: hashFiles('package.json') != ''
+        run: npm install --legacy-peer-deps
+      - name: Run lint
+        if: hashFiles('package.json') != ''
+        run: |
+          if node -e "require('./package.json').scripts?.lint" 2>/dev/null; then
+            npm run lint
+          else
+            echo "No lint script — skipping"
+          fi
+      - name: Template repo — no lint
+        if: hashFiles('package.json') == ''
+        run: echo "Template repo has no package.json — lint not applicable."
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        if: hashFiles('package.json') != ''
+        run: npm install --legacy-peer-deps
+      - name: Run typecheck
+        if: hashFiles('package.json') != ''
+        run: |
+          if node -e "require('./package.json').scripts?.typecheck" 2>/dev/null; then
+            npm run typecheck
+          else
+            echo "No typecheck script — skipping"
+          fi
+      - name: Template repo — no typecheck
+        if: hashFiles('package.json') == ''
+        run: echo "Template repo has no package.json — typecheck not applicable."
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        if: hashFiles('package.json') != ''
+        run: npm install --legacy-peer-deps
+      - name: Run build
+        if: hashFiles('package.json') != ''
+        run: |
+          if node -e "require('./package.json').scripts?.build" 2>/dev/null; then
+            npm run build
+          else
+            echo "No build script — skipping"
+          fi
+      - name: Template repo — no build
+        if: hashFiles('package.json') == ''
+        run: echo "Template repo has no package.json — build not applicable."
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        if: hashFiles('package.json') != ''
+        run: npm install --legacy-peer-deps
+      - name: Run Node tests
+        if: hashFiles('package.json') != ''
+        run: |
+          if node -e "require('./package.json').scripts?.test" 2>/dev/null; then
+            npm run test
+          else
+            echo "No test script — skipping"
+          fi
+      - name: Run Python tests
+        run: |
+          if [ -d tests ] && [ -n "$(find tests -name '*.py' -print -quit)" ]; then
+            pip install pytest
+            pytest tests/
+          else
+            echo "No Python tests found"
+          fi
+      - name: Template repo — no tests
+        if: hashFiles('package.json') == ''
+        run: echo "Template repo has no package.json — Node tests not applicable."
